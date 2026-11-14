@@ -42,12 +42,6 @@ python possession.py --data-dir "Tactical" --out "outputs/Catalan compilers.csv"
 
 Replace `Tactical` with your input folder if it is elsewhere. Inputs are not modified.
 
-To run the tests with invented data:
-
-```sh
-python test_possession.py
-```
-
 The CSV has a `frame,label` header and one row per frame, numbered from zero:
 
 | Label | Meaning |

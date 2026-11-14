@@ -34,3 +34,4 @@ __pycache__/
 *.ipynb
 
 submission/
+/test_possession.py
