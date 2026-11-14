@@ -18,7 +18,7 @@ the same output from the same inputs.
 |---|---|
 | `BAR-ATH_tactical_atd.txt` | Ball and available player positions at each frame. |
 | `BAR-ATH_tactical_atd.xml` | Match metadata and team membership of player-tracking slots. |
-| `BAR-ATH_tactical_smart_tagging.xml` | Automatic phases as weak support when tracking is unclear. |
+| `BAR-ATH_tactical_smart_tagging.xml` | Weak team support when tracking is unclear, and set-piece preparation cues. |
 
 Coordinates are converted to metres using a 105.3 by 68 metre pitch. Movement
 is calculated from consecutive positions at 25 frames per second. Missing
@@ -50,10 +50,16 @@ Invented examples are used for software tests only.
 - **Confirmation:** control supported by movement needs 0.2 seconds of
   consecutive evidence; proximity alone needs 1 second and tags need 2 seconds.
   Missing or conflicting evidence resets a pending change.
-- **Dead balls and restarts:** the ball must remain more than 0.25 metres
-  outside the pitch for 1 second to establish `D`. Returning to possession
-  requires the ball to be inside, move at least 1 metre from its restart
+- **Dead balls:** the ball remaining more than 0.25 metres outside the pitch
+  for 1 second establishes `D`. Inside the pitch, an automatic set-piece cue
+  must coincide with 1 second of reliable nearby player control, both teams
+  observed, and the ball staying within 0.25 metres of its first observed
+  position in that cue. A stationary ball or a tag alone is not enough.
+- **Restarts:** the ball must be inside, move at least 1 metre from its restart
   placement and show confirmed player control. Tags alone cannot restart play.
+  Observed movement of 1 metre also disables the current set-piece cue until
+  that interval ends, avoiding repeated stoppages during subsequent play.
+  Tracking gaps do not re-arm it.
 - **Tracking quality and timeline:** implausible ball jumps are filtered.
   State resets between halves, and frames outside the documented active
   periods are `X`.
@@ -66,8 +72,10 @@ confirming sequence from its start rather than only from the final frame.
 Proximity and 2D movement cannot prove control, especially without ball height.
 Missing players, slot changes and tracking errors can produce wrong decisions.
 Keeping the previous team through uncertainty can extend an incorrect possession,
-and broad automatic phases can miss turnovers. Stoppages inside the pitch are
-not detected, and restart confirmation can delay a genuine restart.
+and broad automatic phases can miss turnovers. In-pitch stoppages without a
+usable set-piece cue can be missed, while inaccurate cues can mistake a live
+pause for a stoppage. Late cues or early ball repositioning can also hide
+preparation. Restart confirmation can delay a genuine restart.
 
 With more time, we would evaluate and tune the rules on licensed external
 development matches, then test on separate held-out matches.

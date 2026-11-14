@@ -35,6 +35,11 @@ DEFENCE_CODES = {
 TAG_TEAMS = {"barcelona": "H", "atletic club": "A", "athletic club": "A"}
 
 
+class Tag(NamedTuple):
+    team: str
+    set_piece: bool = False
+
+
 def track_teams(path):
     """Use the team/slot order specified by the public starter's EPTS loader."""
     root = ET.parse(path).getroot()
@@ -59,13 +64,18 @@ def position(group):
 
 
 def tagging_evidence(path, expected_rows, fps=25):
-    """Convert automatic phases to weak H/A evidence on half-open frame intervals.
+    """Convert automatic phases to team support and half-open set-piece cues.
 
     Conflicting teams produce X, regardless of the number of overlapping tags.
-    Set pieces, goals, player counts, and defensive transitions are deliberately
-    excluded: their intervals do not establish the exact live-ball state.
+    A set-piece interval is only a cue, not proof that the ball is dead.
+    Goals, player counts and defensive transitions are not possession evidence.
     """
-    differences = {team: [0] * (expected_rows + 1) for team in ("H", "A")}
+    if (
+        not isinstance(expected_rows, int) or isinstance(expected_rows, bool) or expected_rows < 0
+        or isinstance(fps, bool) or not math.isfinite(fps) or fps <= 0
+    ):
+        raise ValueError("Invalid automatic tag timeline or frame rate.")
+    differences = {key: [0] * (expected_rows + 1) for key in ("H", "A", "set_piece")}
     for event in ET.parse(path).iter("instance"):
         start = float(event.findtext("start", ""))
         end = float(event.findtext("end", ""))
@@ -79,7 +89,9 @@ def tagging_evidence(path, expected_rows, fps=25):
         }
         # Unknown, absent, or multiple distinct Team values are not evidence.
         side = TAG_TEAMS.get(next(iter(teams))) if len(teams) == 1 else None
-        if side is None or code not in ATTACK_CODES | DEFENCE_CODES:
+        if code == "set pieces":
+            side = "set_piece"
+        elif side is None or code not in ATTACK_CODES | DEFENCE_CODES:
             continue
         if code in DEFENCE_CODES:
             side = "A" if side == "H" else "H"
@@ -89,11 +101,12 @@ def tagging_evidence(path, expected_rows, fps=25):
         differences[side][end_frame] -= 1
     # difference arrays avoid scanning every event per frame;
     # no learned weights or match-derived duration rules.
-    home = away = 0
+    home = away = set_piece = 0
     for frame in range(expected_rows):
         home += differences["H"][frame]
         away += differences["A"][frame]
-        yield "H" if home and not away else "A" if away and not home else "X"
+        set_piece += differences["set_piece"][frame]
+        yield Tag("H" if home and not away else "A" if away and not home else "X", bool(set_piece))
 
 
 def validate_csv(path, expected_rows):
@@ -147,12 +160,13 @@ DEFAULTS = {
     "tag_confirm_seconds": 2.0,
     "dead_confirm_seconds": 1.0,
     "restart_distance": 1.0,
+    "stationary_tolerance": 0.25,
 }
 
 
 class Evidence(NamedTuple):
     label: str
-    strength: int  # Ordinal support: 0 tag/unknown, 1 proximity/boundary, 2 co-motion.
+    strength: int  # Ordinal support: 0 tag/unknown, 1 proximity/dead ball, 2 co-motion.
     source: str
     ball: tuple | None = None  # Metres, never invented/interpolated coordinates.
     inside: bool = False
@@ -265,15 +279,22 @@ def observations(
     if isinstance(fps, bool) or not math.isfinite(fps) or fps <= 0:
         raise ValueError("Frame rate must be positive and finite.")
     if tagging is None:
-        tagging = ("X" for _ in range(expected_rows))
+        tagging = (Tag("X") for _ in range(expected_rows))
     anchor = previous_raw = previous_ball = previous_players = previous_block = None
+    phase_origin, phase_consumed = None, False
     for frame, (record, tag) in enumerate(zip_longest(records(path, teams, expected_rows, pitch), tagging)):
-        if record is None or tag not in {"H", "A", "X"}:
+        if (
+            record is None or not isinstance(tag, Tag) or tag.team not in {"H", "A", "X"}
+            or not isinstance(tag.set_piece, bool)
+        ):
             raise ValueError("Automatic tags or timeline lengths are invalid.")
         players, ball = record
         block = block_at(frame, play_blocks)
         if block != previous_block or block is None:
             anchor = previous_raw = previous_ball = previous_players = None
+            phase_origin, phase_consumed = None, False
+        if not use_tags or not tag.set_piece:
+            phase_origin, phase_consumed = None, False
         previous_block = block
         if block is None:
             yield Evidence("X", 0, "inactive")
@@ -295,15 +316,29 @@ def observations(
             evidence = control(
                 players, teams, ball, previous_players, previous_ball, pitch, fps, params, use_motion,
             )
+            if use_tags and tag.set_piece and evidence.inside:
+                if phase_origin is None:
+                    phase_origin = ball
+                displacement = distance(ball, phase_origin)
+                if displacement >= params["restart_distance"]:
+                    phase_consumed = True
+                # dover-gain-efficient: one cue per contiguous phase; licensed
+                # external evaluation is needed before adding finer stoppage rules.
+                if (
+                    not phase_consumed and displacement <= params["stationary_tolerance"]
+                    and evidence.source == "motion"
+                    and {team for team, player in zip(teams, players) if player is not None} == {"H", "A"}
+                ):
+                    evidence = Evidence("D", 1, "stoppage", ball, True)
             previous_ball, previous_players = ball, players
         # Observed flight, duels and rejected jumps veto tag fallback. Missing or
         # otherwise ambiguous tracking may use a slower, weak automatic phase.
         if (
-            use_tags and tag != "X" and evidence.label == "X"
+            use_tags and tag.team != "X" and evidence.label == "X"
             and evidence.source in {"missing", "ambiguous"}
             and (evidence.ball is None or evidence.inside)
         ):
-            evidence = Evidence(tag, 0, "tag", evidence.ball, evidence.inside)
+            evidence = Evidence(tag.team, 0, "tag", evidence.ball, evidence.inside)
         yield evidence
 
 
@@ -323,9 +358,10 @@ def segment(
         "proximity": confirm_frames,
         "tag": max(1, math.ceil(params["tag_confirm_seconds"] * fps)),
         "boundary": max(1, math.ceil(params["dead_confirm_seconds"] * fps)),
+        "stoppage": max(1, math.ceil(params["dead_confirm_seconds"] * fps)),
     }
     sources = {
-        "motion", "proximity", "tag", "boundary", "missing", "ambiguous",
+        "motion", "proximity", "tag", "boundary", "stoppage", "missing", "ambiguous",
         "contested", "flight", "rejected", "inactive",
     }
     state, pending, count, onset, previous_block, placement = "X", None, 0, None, None, None
@@ -335,14 +371,14 @@ def segment(
             not isinstance(item, Evidence) or item.label not in {"H", "A", "D", "X"}
             or item.source not in sources or not isinstance(item.strength, int)
             or isinstance(item.strength, bool) or item.strength not in {0, 1, 2}
-            or item.strength != (2 if item.source == "motion" else 1 if item.source in {"proximity", "boundary"} else 0)
+            or item.strength != (2 if item.source == "motion" else 1 if item.source in {"proximity", "boundary", "stoppage"} else 0)
             or not isinstance(item.inside, bool)
             or (item.ball is not None and (len(item.ball) != 2 or not all(map(math.isfinite, item.ball))))
             or (item.inside and item.ball is None)
-            or (item.source in {"motion", "proximity"} and (item.ball is None or not item.inside))
+            or (item.source in {"motion", "proximity", "stoppage"} and (item.ball is None or not item.inside))
             or (item.source == "boundary" and (item.ball is None or item.inside))
             or (item.label in {"H", "A"} and item.source not in {"motion", "proximity", "tag"})
-            or (item.label == "D" and item.source != "boundary")
+            or (item.label == "D" and item.source not in {"boundary", "stoppage"})
             or (item.label == "X" and item.source in durations)
         ):
             raise ValueError("Invalid control evidence.")
@@ -384,7 +420,7 @@ def segment(
             # streaming only if a longer recording makes memory a bottleneck.
             labels[onset:frame + 1] = [state] * (frame - onset + 1)
             pending, count, onset = None, 0, None
-            placement = None
+            placement = item.ball if state == "D" and item.inside else None
     return labels
 
 

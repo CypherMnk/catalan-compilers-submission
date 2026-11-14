@@ -27,7 +27,9 @@ pass or brief challenge does not automatically change possession.
 It waits for consistent evidence before switching teams and keeps the last
 confirmed team when the data is unclear. Automatic phases provide weak support
 when tracking is missing or ambiguous. It also filters implausible ball jumps
-and checks for the ball leaving the pitch and restarting play.
+and checks for the ball leaving the pitch. For some in-pitch stoppages, it
+combines a set-piece tag with sustained near-stationary tracking. Restarting
+requires observed ball movement and confirmed control, not just a tag.
 
 ## Run
 

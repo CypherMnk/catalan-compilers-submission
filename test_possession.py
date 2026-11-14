@@ -38,6 +38,10 @@ def main():
     restart = [dead] * 25 + [point()] * 5 + [point(x=11.1)] * 5
     assert algorithm.segment(restart) == ["D"] * 30 + ["H"] * 5
     assert algorithm.segment(restart, restart_guard=False) == ["D"] * 25 + ["H"] * 10
+    stopped = point("D", "stoppage")
+    assert algorithm.segment([stopped] * 24) == ["X"] * 24
+    assert algorithm.segment([stopped] * 25 + [point(x=11.1)] * 5) == ["D"] * 25 + ["H"] * 5
+    assert algorithm.segment([stopped] * 25 + [unknown] * 10 + [point()] * 10) == ["D"] * 45
     assert algorithm.segment([]) == []
     for duration in (0, -1, True, 1.5):
         try:
@@ -50,6 +54,9 @@ def main():
         algorithm.Evidence("H", 2, "rejected"), algorithm.Evidence("X", 0, "motion"),
         algorithm.Evidence("H", True, "motion"), algorithm.Evidence("H", 2, "motion", (float("nan"), 0), True),
         algorithm.Evidence("H", 2, "motion"), algorithm.Evidence("D", 1, "boundary", (0, 0), True),
+        algorithm.Evidence("D", 1, "stoppage"), algorithm.Evidence("D", 1, "stoppage", (0, 0), False),
+        algorithm.Evidence("D", 2, "stoppage", (0, 0), True),
+        algorithm.Evidence("H", 1, "stoppage", (0, 0), True),
     ):
         try:
             algorithm.segment([item])
@@ -59,6 +66,7 @@ def main():
     for params in (
         {"unknown": 1}, {"relative_control_speed": 0},
         {"restart_distance": float("inf")}, {"max_ball_speed": "fast"},
+        {"stationary_tolerance": -1},
     ):
         try:
             algorithm.settings(params)
@@ -84,7 +92,9 @@ def main():
                 ), encoding="utf-8",
             )
             return list(algorithm.observations(
-                raw, ["H", "A"], len(balls), (100, 60), tagging=tags, **kwargs,
+                raw, ["H", "A"], len(balls), (100, 60),
+                tagging=[algorithm.Tag(team) for team in tags] if isinstance(tags, str) else tags,
+                **kwargs,
             ))
 
         moving = [(10 + i * 0.1, 20) for i in range(7)]
@@ -126,8 +136,48 @@ def main():
         balls = [(10, 20)] * 6 + flight + [(20, 20)] * 6
         labels = algorithm.segment(run(balls, away=[(20, 20)] * len(balls), tags="A" * len(balls)))
         assert labels[1:16] == ["H"] * 15 and labels[16:] == ["A"] * 6
+        # In-pitch dead balls need BOTH a set-piece cue and quiet, reliable control.
+        cue = algorithm.Tag("X", True)
+        quiet = [(10, 20)] * 30
+        assert "D" not in algorithm.segment(run(quiet))
+        preparation = run(quiet, tags=[cue] * 30)
+        assert all(item.source == "stoppage" for item in preparation[1:])
+        assert algorithm.segment(preparation) == ["X"] + ["D"] * 29
+        assert "D" not in algorithm.segment(run(quiet[:25], tags=[cue] * 25))
+        assert "D" not in algorithm.segment(run(quiet, tags=[cue] * 30, use_tags=False))
+        assert "D" not in algorithm.segment(run(quiet, tags=[cue] * 30, use_motion=False))
+        travelling = [(10 + 0.1 * i, 20) for i in range(50)]
+        assert "D" not in algorithm.segment(run(travelling, home=travelling, tags=[cue] * 50))
+        duel = run(quiet, home=[(9.8, 20)] * 30, away=[(10.2, 20)] * 30, tags=[cue] * 30)
+        assert all(item.source == "contested" for item in duel)
+        for home, away in (([None] * 30, [None] * 30), (None, [None] * 30), ([None] * 30, None)):
+            assert "D" not in algorithm.segment(run(quiet, home=home, away=away, tags=[cue] * 30))
+        jumping = run([(10, 20), (50, 20), (50, 20)], tags=[cue] * 3)
+        assert jumping[1].source == "rejected" and all(item.source != "stoppage" for item in jumping)
+        broken = quiet[:13] + [None] + quiet[:13]
+        assert "D" not in algorithm.segment(run(broken, tags=[cue] * len(broken)))
+        # Cue expiry and missing tracking do not restart a stationary dead ball.
+        expiring = [cue] * 30 + [algorithm.Tag("H")] * 30
+        assert algorithm.segment(run(quiet * 2, tags=expiring)) == ["X"] + ["D"] * 59
+        # Controlled movement resumes play; a broad cue cannot mark a later pause dead.
+        movement = [(10 + 0.3 * i, 20) for i in range(1, 10)]
+        sequence = quiet + movement + [None] + [movement[-1]] * 30
+        homes = quiet + movement + [movement[-1]] * 31
+        resumed = run(sequence, home=homes, tags=[cue] * len(sequence))
+        assert algorithm.segment(resumed) == ["X"] + ["D"] * 32 + ["H"] * 37
+        assert all(item.source != "stoppage" for item in resumed[30:])
+        # A genuinely new cue can re-arm; a gap by itself cannot.
+        sequence += [movement[-1]] * 31
+        homes += [movement[-1]] * 31
+        renewed = [cue] * 70 + [algorithm.Tag("X")] + [cue] * 30
+        assert algorithm.segment(run(sequence, home=homes, tags=renewed))[-30:] == ["D"] * 30
+        # Even an unbroken tag interval starts afresh in the next half.
+        sequence = travelling + [travelling[-1]] * 30
+        halves = run(sequence, home=sequence, tags=[cue] * 80, play_blocks=((0, 49), (50, 79)))
+        assert halves[50].source == "proximity" and halves[51].source == "stoppage"
+        assert algorithm.segment(halves, play_blocks=((0, 49), (50, 79)))[50:] == ["X"] + ["D"] * 29
         assert run([]) == []
-        for tags in ("H", "HHH", "HD"):
+        for tags in ("H", "HHH", "HD", [algorithm.Tag("H", 1)] * 2, [("H", True)] * 2):
             try:
                 run([(10, 20)] * 2, tags=tags)
                 raise AssertionError("Invalid tags accepted.")
@@ -174,7 +224,7 @@ def main():
             ), encoding="utf-8")
             return list(algorithm.observations(
                 path, ["H", "A"], len(balls), (100, 60),
-                tagging="A" * len(balls), **kwargs,
+                tagging=[algorithm.Tag("A")] * len(balls), **kwargs,
             ))
 
         balls = [(10, 20)] * 6 + [(10 + 0.2 * (i + 1), 20) for i in range(55)]
@@ -248,8 +298,28 @@ def main():
             ET.SubElement(label, "group").text = "TEAM"
             ET.SubElement(label, "text").text = team
         ET.ElementTree(tag_root).write(tags, encoding="utf-8")
-        assert list(algorithm.tagging_evidence(tags, 8, fps=1)) == list("HHXXAAXA")
-        for start, end in (("NaN", "1"), ("2", "1"), ("", "1")):
+        expected = [algorithm.Tag(team, frame == 6) for frame, team in enumerate("HHXXAAXA")]
+        assert list(algorithm.tagging_evidence(tags, 8, fps=1)) == expected
+        # Overlapping and unknown-team cues merge; negative/empty/outside intervals are clipped.
+        for start, end, team in ((5, 8, "Unknown"), (6, 9, ""), (1, 1, ""), (-3, -1, ""), (9, 10, "")):
+            event = ET.SubElement(tag_root, "instance")
+            for name, value in (("start", start), ("end", end), ("code", " set  PIECES ")):
+                ET.SubElement(event, name).text = str(value)
+            if team:
+                label = ET.SubElement(event, "label")
+                ET.SubElement(label, "group").text = "Team"
+                ET.SubElement(label, "text").text = team
+        ET.ElementTree(tag_root).write(tags, encoding="utf-8")
+        assert list(algorithm.tagging_evidence(tags, 8, fps=1)) == [
+            algorithm.Tag(team, frame >= 5) for frame, team in enumerate("HHXXAAXA")
+        ]
+        for rows, fps in ((-1, 25), (True, 25), (8, 0), (8, True), (8, float("nan"))):
+            try:
+                list(algorithm.tagging_evidence(tags, rows, fps=fps))
+                raise AssertionError("Invalid phase timeline accepted.")
+            except ValueError:
+                pass
+        for start, end in (("NaN", "1"), ("2", "1"), ("", "1"), ("0", "inf")):
             tags.write_text(
                 f"<root><instance><start>{start}</start><end>{end}</end>"
                 "<code>BUILD UP</code></instance></root>", encoding="utf-8",
