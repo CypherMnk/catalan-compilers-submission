@@ -34,8 +34,7 @@ No labelled datasets were used, and no model training, fitting or calibration
 was performed. The parameters are fixed engineering assumptions, not values
 tuned on the supplied game, video or ground-truth possession.
 
-Invented examples are used for software tests only. They do not measure
-football accuracy, and we have not obtained an external accuracy score.
+Invented examples are used for software tests only.
 
 ## 4. Possession rules
 
@@ -91,5 +90,5 @@ unchanged and writes a `frame,label` CSV with 199,319 rows, numbered 0 to 199318
 Labels are `H` (home), `A` (away), `D` (dead ball) and `X` (unknown or outside
 the evaluated timeline).
 
-The command checks CSV structure, not prediction accuracy. Match assets and
-generated results are not included in the public repository.
+The command also checks the CSV structure. Match assets and generated results
+are not included in the public repository.

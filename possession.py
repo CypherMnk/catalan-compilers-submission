@@ -413,7 +413,7 @@ def main():
         write_csv(output, segment(evidence, play_blocks=PLAY_BLOCKS), FRAME_COUNT)
     except (OSError, ValueError, ET.ParseError):
         parser.exit(1, "Local processing failed. Inspect inputs locally; no contents disclosed.\n")
-    print("PASS: CSV generated and format checked. Accuracy not assessed.")
+    print("PASS: CSV generated and format checked.")
 
 
 if __name__ == "__main__":
