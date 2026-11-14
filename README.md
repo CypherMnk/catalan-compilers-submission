@@ -20,9 +20,10 @@ Match data is not included in this repository and must be obtained separately.
 
 ## How it works
 
-The algorithm looks for a player close to the ball and clearly closer than
-the nearest opponent. Moving with the ball strengthens that evidence; a fast
-pass or brief challenge does not automatically change possession.
+The algorithm looks for a player close to the ball. If opponents are visible,
+that player must be clearly closer than the nearest opponent. Moving with the
+ball strengthens that evidence; a fast pass or brief challenge does not
+automatically change possession.
 
 It waits for consistent evidence before switching teams and keeps the last
 confirmed team when the data is unclear. Automatic phases provide weak support

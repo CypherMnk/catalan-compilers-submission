@@ -38,9 +38,10 @@ Invented examples are used for software tests only.
 
 ## 4. Possession rules
 
-- **Control:** a player must be within 2 metres of the ball and more than
-  0.5 metres closer than the nearest observed opponent. Moving with the ball
-  strengthens the evidence; excessive relative motion rejects it.
+- **Control:** a player must be within 2 metres of the ball. If an opponent
+  is observed, the player must be more than 0.5 metres closer than the nearest
+  opponent. Moving with the ball strengthens the evidence; excessive relative
+  motion rejects it.
 - **Loose balls and challenges:** a fast passing ball or close contest does
   not establish a change. The last confirmed label is retained until new
   control is confirmed. Before the first confirmation, the label is `X`.
@@ -54,7 +55,7 @@ Invented examples are used for software tests only.
   for 1 second establishes `D`. Inside the pitch, an automatic set-piece cue
   must coincide with 1 second of reliable nearby player control, both teams
   observed, and the ball staying within 0.25 metres of its first observed
-  position in that cue. A stationary ball or a tag alone is not enough.
+  inside-pitch position in that cue. A stationary ball or a tag alone is not enough.
 - **Restarts:** the ball must be inside, move at least 1 metre from its restart
   placement and show confirmed player control. Tags alone cannot restart play.
   Observed movement of 1 metre also disables the current set-piece cue until
